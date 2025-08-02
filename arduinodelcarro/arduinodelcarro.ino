@@ -1,14 +1,14 @@
 // Pines del L298N
-const int IN1 = 8;
-const int IN2 = 9;
-const int IN3 = 10;
-const int IN4 = 11;
-const int ENA = 5;
-const int ENB = 6;
+const int ENA = 2;
+const int IN1 = 3;
+const int IN2 = 4;
+const int IN3 = 5;
+const int IN4 = 6;
+const int ENB = 7;
 
 // Pines del sensor ultrasónico
-const int TRIGGER = 3;
-const int ECHO = 4;
+const int TRIGGER = 8;
+const int ECHO = 9;
 
 // Parámetros de velocidad y tiempos
 const int VELOCIDAD = 200;
@@ -45,7 +45,7 @@ void loop() {
     retroceder(VELOCIDAD);
     delay(TIEMPO_RETROCESO);
     detener();
-    delay(100);
+    delay(5000);
 
     // Girar aleatoriamente a izquierda o derecha
     if (random(0, 2) == 0) {
@@ -123,7 +123,7 @@ medirDistancia() {
   digitalWrite(TRIGGER, LOW);
 
   long duracion = pulseIn(ECHO, HIGH, 20000);  // Timeout 20 ms
-  if (duracion == 0) return -1;
+  if (duracion == 0) return 999;
 
   float distancia = duracion * 0.034 / 2;
   return distancia;
