@@ -18,9 +18,14 @@ const int ECHO = 9;      // Pin Echo del sensor ultrasónico
 const int sensorHumedad = A0;   // Pin analógico A0 para el sensor de humedad
 const int pinRele = 10;         // Pin digital 10 para el relé
 
+// --- PINES DEL SENSOR DE LUZ IR
+const int IR_L = 11; // Sensor Luz Izquierdo
+const int IR_M = 12; // Sensor Luz Central
+const int IR_R = 13; // Sensor Luz Derecho
+
 // --- PARÁMETROS DEL ROBOT ---
-const int VELOCIDAD = 200;
-const unsigned long TIEMPO_RETROCESO = 600;  // Tiempo de retroceso en ms
+const int VELOCIDAD = 140;
+const unsigned long TIEMPO_RETROCESO = 300;  // Tiempo de retroceso en ms
 const unsigned long TIEMPO_GIRO = 700;       // Tiempo de giro en ms
 const unsigned long TIEMPO_PAUSA_ANTES_AVANZAR = 3000; // 3 segundos de pausa
 const unsigned long TIEMPO_PAUSA_ANTES_RETROCEDER = 500; // Nuevo: 0.5 segundos de pausa antes de retroceder
@@ -31,15 +36,18 @@ const int umbralSeco = 300;     // Umbral para suelo seco, ajusta según tu sens
 // --- VARIABLES GLOBALES ---
 int valorHumedad = 0;
 bool bombaEncendida = false;    // Estado actual de la bomba
+bool luzIzquierda = false;
+bool luzCentral = false;
+bool luzDerecha = false;
 
 // Variables para el control no bloqueante del robot
 unsigned long tiempoInicioAccion;
 
 // Variables para el control no bloqueante del riego
 unsigned long tiempoUltimaMedicionHumedad = 0;
-const unsigned long intervaloMedicionHumedad = 2000; // Medir humedad cada 2 segundos
+const unsigned long intervaloMedicionHumedad = 500; // Medir humedad cada 2 segundos
 
-// Nuevas variables para el control no bloqueante del robot
+// Variables para el control no bloqueante del movimiento del robot
 unsigned long tiempoUltimaMedicionDistancia = 0;
 const unsigned long intervaloMedicionDistancia = 50; // Medir distancia cada 50 ms
 
@@ -65,10 +73,14 @@ void setup() {
   pinMode(TRIGGER, OUTPUT);
   pinMode(ECHO, INPUT);
 
+  pinMode(IR_L, INPUT);
+  pinMode(IR_M, INPUT);
+  pinMode(IR_R, INPUT);
+
   // Configuración de pines para el sistema de riego
   pinMode(sensorHumedad, INPUT);
   pinMode(pinRele, OUTPUT);
-  digitalWrite(pinRele, HIGH); // Apagar bomba al inicio (relé activo en LOW)
+  digitalWrite(pinRele, LOW); // Apagar bomba al inicio (relé activo en LOW)
 
   Serial.begin(9600);
   // Se usa A2 para randomSeed para evitar el conflicto con el sensor de humedad que ahora usa A0
@@ -86,17 +98,21 @@ void loop() {
     Serial.print("Valor humedad: ");
     Serial.println(valorHumedad);
 
+    Serial.println("Direccion de luz: ");
+
+
+
     // Si el suelo está seco y la bomba está apagada, la enciende
     if (valorHumedad > umbralSeco && !bombaEncendida) {
       digitalWrite(pinRele, LOW);
       bombaEncendida = true;
-      Serial.println("🌱 Suelo seco - Bomba ENCENDIDA 💧");
+      Serial.println("🌿 Suelo húmedo - Bomba APAGADA");
     }
     // Si el suelo está húmedo y la bomba está encendida, la apaga
     else if (valorHumedad <= umbralSeco && bombaEncendida) {
       digitalWrite(pinRele, HIGH);
       bombaEncendida = false;
-      Serial.println("🌿 Suelo húmedo - Bomba APAGADA");
+      Serial.println("🌱 Suelo seco - Bomba ENCENDIDA 💧");
     }
   }
 
@@ -106,14 +122,14 @@ void loop() {
     tiempoUltimaMedicionDistancia = millis();
 
     float distancia = medirDistancia();
-    Serial.print("Distancia: ");
-    Serial.print(distancia);
-    Serial.println(" cm");
+  //  Serial.print("Distancia: ");
+  //  Serial.print(distancia);
+  //  Serial.println(" cm");
 
     switch (estadoActual) {
       case AVANZANDO:
         avanzar(VELOCIDAD);
-        if (distancia > 0 && distancia <= 5) {
+        if (distancia > 0 && distancia <= 15) {
           Serial.println("Obstáculo detectado! Pausando antes de retroceder...");
           estadoActual = PAUSANDO_ANTES_RETROCEDER;
           detener();
