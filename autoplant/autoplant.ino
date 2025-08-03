@@ -27,8 +27,8 @@ const int IR_R = 13; // Sensor Luz Derecho
 const int VELOCIDAD = 140;
 const unsigned long TIEMPO_RETROCESO = 300;  // Tiempo de retroceso en ms
 const unsigned long TIEMPO_GIRO = 700;       // Tiempo de giro en ms
-const unsigned long TIEMPO_PAUSA_ANTES_AVANZAR = 3000; // 3 segundos de pausa
-const unsigned long TIEMPO_PAUSA_ANTES_RETROCEDER = 500; // Nuevo: 0.5 segundos de pausa antes de retroceder
+const unsigned long TIEMPO_PAUSA_ANTES_AVANZAR = 8000; // 8 segundos de pausa
+const unsigned long TIEMPO_PAUSA_ANTES_RETROCEDER = 1500; // Nuevo: 1.5 segundos de pausa antes de retroceder
 
 // --- PARÁMETROS DEL SISTEMA DE RIEGO ---
 const int umbralSeco = 300;     // Umbral para suelo seco, ajusta según tu sensor
