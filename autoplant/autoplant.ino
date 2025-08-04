@@ -229,7 +229,19 @@ void loop() {
 
       case AVANZANDO_TRAS_GIRO_LUZ:
         // Mantener el avance y verificar distancia
-        avanzar(VELOCIDAD);
+        direccion = getLightDirection();
+        switch (direccion) {
+          case LIGHT_CENTER:
+          case LIGHT_CENTER_LEFT:
+          case LIGHT_CENTER_RIGHT:
+          case LIGHT_FRONT:
+            Serial.println("Luz al frente despues del giro, deteniendo.");
+            detener();
+            break;
+          default:
+            avanzar(VELOCIDAD);
+            break;
+        }
         if (millis() - tiempoUltimaMedicionDistancia >= intervaloMedicionDistancia) {
           tiempoUltimaMedicionDistancia = millis();
           float distancia = medirDistancia();
