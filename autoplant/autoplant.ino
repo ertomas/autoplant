@@ -38,6 +38,7 @@ const int VELOCIDAD = 140;
 const unsigned long TIEMPO_RETROCESO = 300;  // Tiempo de retroceso en ms
 const unsigned long TIEMPO_GIRO = 700;       // Tiempo de giro en ms (para evasión de obstáculos)
 const unsigned long TIEMPO_GIRO_LUZ = 200;   // Tiempo de giro corto para seguimiento de luz
+const unsigned long TIEMPO_AVANCE_TRAS_GIRO_LUZ = 1000; // Tiempo de avance tras giro por luz (1 segundo)
 const unsigned long TIEMPO_PAUSA_ANTES_AVANZAR = 8000; // 8 segundos de pausa
 const unsigned long TIEMPO_PAUSA_ANTES_RETROCEDER = 1500; // 1.5 segundos de pausa antes de retroceder
 const unsigned long TIEMPO_PAUSA_TRAS_GIRO = 500; // 500 ms de pausa tras cada giro
@@ -63,15 +64,16 @@ const unsigned long intervaloMedicionDistancia = 50; // Medir distancia cada 50 
 
 // Enum para el estado del robot (para lógica no bloqueante)
 enum EstadoRobot {
-  SEGUIR_LUZ, // Estado para seguimiento de luz
+  BUSCAR_LUZ, // Estado para búsqueda de luz
   GIRANDO_LUZ, // Estado para giros por luz o aleatorios
+  AVANZANDO_TRAS_GIRO_LUZ, // Estado para avanzar tras giro por luz
   PAUSANDO_TRAS_GIRO, // Pausa tras giro por luz o aleatorio
   PAUSANDO_ANTES_RETROCEDER,
   RETROCEDIENDO,
   GIRANDO,
   PAUSANDO
 };
-EstadoRobot estadoActual = SEGUIR_LUZ;
+EstadoRobot estadoActual = BUSCAR_LUZ;
 
 // --- DECLARACIÓN DE FUNCIONES ---
 int getLightDirection();
@@ -136,44 +138,15 @@ void loop() {
     tiempoUltimaMedicionDistancia = millis();
 
     float distancia = medirDistancia();
-    // Serial.print("Distancia: ");
-    // Serial.print(distancia);
-    // Serial.println(" cm");
+    //Serial.print("Distancia: ");
+    //Serial.print(distancia);
+    //Serial.println(" cm");
 
-    // Obtener dirección de la luz solo en SEGUIR_LUZ
-    int direccion = (estadoActual == SEGUIR_LUZ) ? getLightDirection() : NO_LIGHT;
-    if (estadoActual == SEGUIR_LUZ) {
-      Serial.print("Dirección de luz: ");
-      switch (direccion) {
-        case NO_LIGHT:
-          Serial.println("No se detecta luz");
-          break;
-        case LIGHT_LEFT:
-          Serial.println("Luz detectada a la IZQUIERDA");
-          break;
-        case LIGHT_CENTER:
-          Serial.println("Luz detectada en el CENTRO");
-          break;
-        case LIGHT_RIGHT:
-          Serial.println("Luz detectada a la DERECHA");
-          break;
-        case LIGHT_CENTER_LEFT:
-          Serial.println("Luz detectada en el CENTRO IZQUIERDO");
-          break;
-        case LIGHT_CENTER_RIGHT:
-          Serial.println("Luz detectada en el CENTRO DERECHO");
-          break;
-        case LIGHT_FRONT:
-          Serial.println("Luz detectada al FRENTE");
-          break;
-        default:
-          Serial.println("Dirección desconocida");
-          break;
-      }
-    }
+    // Obtener dirección de la luz solo en BUSCAR_LUZ
+    int direccion = (estadoActual == BUSCAR_LUZ) ? getLightDirection() : NO_LIGHT;
 
     switch (estadoActual) {
-      case SEGUIR_LUZ:
+      case BUSCAR_LUZ:
         // Si hay un obstáculo, pasar a la lógica de evasión
         if (distancia > 0 && distancia <= 15) {
           Serial.println("Obstáculo detectado! Pausando antes de retroceder...");
@@ -203,7 +176,9 @@ void loop() {
             case LIGHT_CENTER:
             case LIGHT_CENTER_LEFT:
             case LIGHT_CENTER_RIGHT:
-              avanzar(VELOCIDAD);
+            case LIGHT_FRONT:  // Aseguramos que se detenga cuando la luz está al frente
+              Serial.println("Luz detectada. Deteniendo.");
+              detener();
               break;
             case LIGHT_RIGHT:
               Serial.println("Girando derecha por luz");
@@ -211,22 +186,29 @@ void loop() {
               estadoActual = GIRANDO_LUZ;
               tiempoInicioAccion = millis();
               break;
-            case LIGHT_FRONT:
-              detener();
-              break;
           }
         }
         break;
 
       case GIRANDO_LUZ:
         // Ejecutar el giro (izquierda o derecha) durante TIEMPO_GIRO_LUZ
-        if (girarIzquierdaLuz) {
+        if (!girarIzquierdaLuz) {
           girarIzquierda(VELOCIDAD);
         } else {
           girarDerecha(VELOCIDAD);
         }
         if (millis() - tiempoInicioAccion >= TIEMPO_GIRO_LUZ) {
-          Serial.println("Giro por luz completo. Iniciando pausa...");
+          Serial.println("Giro por luz completo. Avanzando...");
+          estadoActual = AVANZANDO_TRAS_GIRO_LUZ;
+          avanzar(VELOCIDAD);
+          tiempoInicioAccion = millis();
+        }
+        break;
+
+      case AVANZANDO_TRAS_GIRO_LUZ:
+        // Mantener el avance durante TIEMPO_AVANCE_TRAS_GIRO_LUZ
+        if (millis() - tiempoInicioAccion >= TIEMPO_AVANCE_TRAS_GIRO_LUZ) {
+          Serial.println("Avance tras giro completo. Pausando...");
           estadoActual = PAUSANDO_TRAS_GIRO;
           detener();
           tiempoInicioAccion = millis();
@@ -280,7 +262,7 @@ void loop() {
       case PAUSANDO:
         if (millis() - tiempoInicioAccion >= TIEMPO_PAUSA_ANTES_AVANZAR) {
           Serial.println("Pausa completa. Volviendo a seguir luz...");
-          estadoActual = SEGUIR_LUZ;
+          estadoActual = BUSCAR_LUZ;
         }
         break;
     }
