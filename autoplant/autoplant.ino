@@ -1,6 +1,7 @@
 // ====================================================================
-// =        CÓDIGO COMBINADO: Movimiento y Detección de Colisiones    =
+// =        CÓDIGO COMBINADO: Movimiento, Detección de Colisiones    =
 // =                       + Control de Bomba de Agua                 =
+// =                       + Seguimiento de Luz                      =
 // ====================================================================
 
 // --- PINES DEL ROBOT (MOTOR L298N y SENSOR ULTRASÓNICO) ---
@@ -18,17 +19,28 @@ const int ECHO = 9;      // Pin Echo del sensor ultrasónico
 const int sensorHumedad = A0;   // Pin analógico A0 para el sensor de humedad
 const int pinRele = 10;         // Pin digital 10 para el relé
 
-// --- PINES DEL SENSOR DE LUZ IR
+// --- PINES DEL SENSOR DE LUZ IR ---
 const int IR_L = 11; // Sensor Luz Izquierdo
 const int IR_M = 12; // Sensor Luz Central
 const int IR_R = 13; // Sensor Luz Derecho
 
+// --- CONSTANTES PARA LAS DIRECCIONES DE LA LUZ ---
+const int NO_LIGHT = 0;
+const int LIGHT_LEFT = 1;
+const int LIGHT_CENTER = 2;
+const int LIGHT_RIGHT = 3;
+const int LIGHT_CENTER_LEFT = 4;
+const int LIGHT_CENTER_RIGHT = 5;
+const int LIGHT_FRONT = 6;
+
 // --- PARÁMETROS DEL ROBOT ---
 const int VELOCIDAD = 140;
 const unsigned long TIEMPO_RETROCESO = 300;  // Tiempo de retroceso en ms
-const unsigned long TIEMPO_GIRO = 700;       // Tiempo de giro en ms
+const unsigned long TIEMPO_GIRO = 700;       // Tiempo de giro en ms (para evasión de obstáculos)
+const unsigned long TIEMPO_GIRO_LUZ = 200;   // Tiempo de giro corto para seguimiento de luz
 const unsigned long TIEMPO_PAUSA_ANTES_AVANZAR = 8000; // 8 segundos de pausa
-const unsigned long TIEMPO_PAUSA_ANTES_RETROCEDER = 1500; // Nuevo: 1.5 segundos de pausa antes de retroceder
+const unsigned long TIEMPO_PAUSA_ANTES_RETROCEDER = 1500; // 1.5 segundos de pausa antes de retroceder
+const unsigned long TIEMPO_PAUSA_TRAS_GIRO = 500; // 500 ms de pausa tras cada giro
 
 // --- PARÁMETROS DEL SISTEMA DE RIEGO ---
 const int umbralSeco = 300;     // Umbral para suelo seco, ajusta según tu sensor
@@ -36,16 +48,14 @@ const int umbralSeco = 300;     // Umbral para suelo seco, ajusta según tu sens
 // --- VARIABLES GLOBALES ---
 int valorHumedad = 0;
 bool bombaEncendida = false;    // Estado actual de la bomba
-bool luzIzquierda = false;
-bool luzCentral = false;
-bool luzDerecha = false;
+bool girarIzquierdaLuz = false; // Controla si el giro por luz o aleatorio es a la izquierda
 
 // Variables para el control no bloqueante del robot
 unsigned long tiempoInicioAccion;
 
 // Variables para el control no bloqueante del riego
 unsigned long tiempoUltimaMedicionHumedad = 0;
-const unsigned long intervaloMedicionHumedad = 500; // Medir humedad cada 2 segundos
+const unsigned long intervaloMedicionHumedad = 500; // Medir humedad cada 500 ms
 
 // Variables para el control no bloqueante del movimiento del robot
 unsigned long tiempoUltimaMedicionDistancia = 0;
@@ -53,13 +63,24 @@ const unsigned long intervaloMedicionDistancia = 50; // Medir distancia cada 50 
 
 // Enum para el estado del robot (para lógica no bloqueante)
 enum EstadoRobot {
-  AVANZANDO,
-  PAUSANDO_ANTES_RETROCEDER, // Nuevo estado
+  SEGUIR_LUZ, // Estado para seguimiento de luz
+  GIRANDO_LUZ, // Estado para giros por luz o aleatorios
+  PAUSANDO_TRAS_GIRO, // Pausa tras giro por luz o aleatorio
+  PAUSANDO_ANTES_RETROCEDER,
   RETROCEDIENDO,
   GIRANDO,
-  PAUSANDO // Estado de pausa después de girar
+  PAUSANDO
 };
-EstadoRobot estadoActual = AVANZANDO;
+EstadoRobot estadoActual = SEGUIR_LUZ;
+
+// --- DECLARACIÓN DE FUNCIONES ---
+int getLightDirection();
+void avanzar(int velocidad);
+void retroceder(int velocidad);
+void girarIzquierda(int velocidad);
+void girarDerecha(int velocidad);
+void detener();
+float medirDistancia();
 
 void setup() {
   // Configuración de pines para el robot
@@ -73,9 +94,10 @@ void setup() {
   pinMode(TRIGGER, OUTPUT);
   pinMode(ECHO, INPUT);
 
-  pinMode(IR_L, INPUT);
-  pinMode(IR_M, INPUT);
-  pinMode(IR_R, INPUT);
+  // Configuración de pines para los sensores IR con pull-up interno
+  pinMode(IR_L, INPUT_PULLUP);
+  pinMode(IR_M, INPUT_PULLUP);
+  pinMode(IR_R, INPUT_PULLUP);
 
   // Configuración de pines para el sistema de riego
   pinMode(sensorHumedad, INPUT);
@@ -83,61 +105,144 @@ void setup() {
   digitalWrite(pinRele, LOW); // Apagar bomba al inicio (relé activo en LOW)
 
   Serial.begin(9600);
-  // Se usa A2 para randomSeed para evitar el conflicto con el sensor de humedad que ahora usa A0
   randomSeed(analogRead(A2));
 }
 
 void loop() {
   // ========================== Lógica del Sistema de Riego (No Bloqueante) ==========================
-  // Verifica si ha pasado el tiempo necesario para medir la humedad
   if (millis() - tiempoUltimaMedicionHumedad >= intervaloMedicionHumedad) {
-    tiempoUltimaMedicionHumedad = millis(); // Actualiza el tiempo de la última medición
+    tiempoUltimaMedicionHumedad = millis();
 
     valorHumedad = analogRead(sensorHumedad);
-
     Serial.print("Valor humedad: ");
     Serial.println(valorHumedad);
-
-    Serial.println("Direccion de luz: ");
-
-
 
     // Si el suelo está seco y la bomba está apagada, la enciende
     if (valorHumedad > umbralSeco && !bombaEncendida) {
       digitalWrite(pinRele, LOW);
       bombaEncendida = true;
-      Serial.println("🌿 Suelo húmedo - Bomba APAGADA");
+      Serial.println("🌿 Suelo seco - Bomba ENCENDIDA 💧");
     }
     // Si el suelo está húmedo y la bomba está encendida, la apaga
     else if (valorHumedad <= umbralSeco && bombaEncendida) {
       digitalWrite(pinRele, HIGH);
       bombaEncendida = false;
-      Serial.println("🌱 Suelo seco - Bomba ENCENDIDA 💧");
+      Serial.println("🌱 Suelo húmedo - Bomba APAGADA");
     }
   }
-
 
   // ========================== Lógica del Robot (No Bloqueante) ==========================
   if (millis() - tiempoUltimaMedicionDistancia >= intervaloMedicionDistancia) {
     tiempoUltimaMedicionDistancia = millis();
 
     float distancia = medirDistancia();
-  //  Serial.print("Distancia: ");
-  //  Serial.print(distancia);
-  //  Serial.println(" cm");
+    // Serial.print("Distancia: ");
+    // Serial.print(distancia);
+    // Serial.println(" cm");
+
+    // Obtener dirección de la luz solo en SEGUIR_LUZ
+    int direccion = (estadoActual == SEGUIR_LUZ) ? getLightDirection() : NO_LIGHT;
+    if (estadoActual == SEGUIR_LUZ) {
+      Serial.print("Dirección de luz: ");
+      switch (direccion) {
+        case NO_LIGHT:
+          Serial.println("No se detecta luz");
+          break;
+        case LIGHT_LEFT:
+          Serial.println("Luz detectada a la IZQUIERDA");
+          break;
+        case LIGHT_CENTER:
+          Serial.println("Luz detectada en el CENTRO");
+          break;
+        case LIGHT_RIGHT:
+          Serial.println("Luz detectada a la DERECHA");
+          break;
+        case LIGHT_CENTER_LEFT:
+          Serial.println("Luz detectada en el CENTRO IZQUIERDO");
+          break;
+        case LIGHT_CENTER_RIGHT:
+          Serial.println("Luz detectada en el CENTRO DERECHO");
+          break;
+        case LIGHT_FRONT:
+          Serial.println("Luz detectada al FRENTE");
+          break;
+        default:
+          Serial.println("Dirección desconocida");
+          break;
+      }
+    }
 
     switch (estadoActual) {
-      case AVANZANDO:
-        avanzar(VELOCIDAD);
+      case SEGUIR_LUZ:
+        // Si hay un obstáculo, pasar a la lógica de evasión
         if (distancia > 0 && distancia <= 15) {
           Serial.println("Obstáculo detectado! Pausando antes de retroceder...");
           estadoActual = PAUSANDO_ANTES_RETROCEDER;
           detener();
           tiempoInicioAccion = millis();
+        } else {
+          // Controlar el movimiento según la dirección de la luz
+          switch (direccion) {
+            case NO_LIGHT:
+              // Girar aleatoriamente si no se detecta luz
+              girarIzquierdaLuz = (random(0, 2) == 0);
+              if (girarIzquierdaLuz) {
+                Serial.println("No hay luz, girando izquierda aleatoriamente");
+              } else {
+                Serial.println("No hay luz, girando derecha aleatoriamente");
+              }
+              estadoActual = GIRANDO_LUZ;
+              tiempoInicioAccion = millis();
+              break;
+            case LIGHT_LEFT:
+              Serial.println("Girando izquierda por luz");
+              girarIzquierdaLuz = true;
+              estadoActual = GIRANDO_LUZ;
+              tiempoInicioAccion = millis();
+              break;
+            case LIGHT_CENTER:
+            case LIGHT_CENTER_LEFT:
+            case LIGHT_CENTER_RIGHT:
+              avanzar(VELOCIDAD);
+              break;
+            case LIGHT_RIGHT:
+              Serial.println("Girando derecha por luz");
+              girarIzquierdaLuz = false;
+              estadoActual = GIRANDO_LUZ;
+              tiempoInicioAccion = millis();
+              break;
+            case LIGHT_FRONT:
+              detener();
+              break;
+          }
         }
         break;
-      
+
+      case GIRANDO_LUZ:
+        // Ejecutar el giro (izquierda o derecha) durante TIEMPO_GIRO_LUZ
+        if (girarIzquierdaLuz) {
+          girarIzquierda(VELOCIDAD);
+        } else {
+          girarDerecha(VELOCIDAD);
+        }
+        if (millis() - tiempoInicioAccion >= TIEMPO_GIRO_LUZ) {
+          Serial.println("Giro por luz completo. Iniciando pausa...");
+          estadoActual = PAUSANDO_TRAS_GIRO;
+          detener();
+          tiempoInicioAccion = millis();
+        }
+        break;
+
+      case PAUSANDO_TRAS_GIRO:
+        detener();
+        if (millis() - tiempoInicioAccion >= TIEMPO_PAUSA_TRAS_GIRO) {
+          Serial.println("Pausa tras giro completa. Volviendo a seguir luz...");
+          estadoActual = PAUSANDO;
+        }
+        break;
+
       case PAUSANDO_ANTES_RETROCEDER:
+        detener();
         if (millis() - tiempoInicioAccion >= TIEMPO_PAUSA_ANTES_RETROCEDER) {
           Serial.println("Pausa completa. Retrocediendo...");
           estadoActual = RETROCEDIENDO;
@@ -171,11 +276,11 @@ void loop() {
           tiempoInicioAccion = millis();
         }
         break;
-      
+
       case PAUSANDO:
         if (millis() - tiempoInicioAccion >= TIEMPO_PAUSA_ANTES_AVANZAR) {
-          Serial.println("Pausa completa. Avanzando de nuevo...");
-          estadoActual = AVANZANDO;
+          Serial.println("Pausa completa. Volviendo a seguir luz...");
+          estadoActual = SEGUIR_LUZ;
         }
         break;
     }
@@ -236,10 +341,34 @@ float medirDistancia() {
   delayMicroseconds(10);
   digitalWrite(TRIGGER, LOW);
 
-  // Timeout reducido para que el sensor no bloquee el loop por mucho tiempo
   long duracion = pulseIn(ECHO, HIGH, 10000); // Timeout 10 ms
   if (duracion == 0) return 999;
 
   float distancia = duracion * 0.034 / 2;
   return distancia;
+}
+
+// ========================== FUNCIÓN PARA DETECCIÓN DE LUZ ==========================
+int getLightDirection() {
+  // Leer los estados de los sensores
+  bool luzIzquierda = digitalRead(IR_L);
+  bool luzCentral = digitalRead(IR_M);
+  bool luzDerecha = digitalRead(IR_R);
+
+  // Sensores activos en alto (HIGH cuando detectan luz)
+  if (luzIzquierda == HIGH && luzCentral == HIGH && luzDerecha == HIGH) {
+    return LIGHT_FRONT;
+  } else if (luzIzquierda == HIGH && luzCentral == HIGH) {
+    return LIGHT_CENTER_LEFT;
+  } else if (luzDerecha == HIGH && luzCentral == HIGH) {
+    return LIGHT_CENTER_RIGHT;
+  } else if (luzIzquierda == HIGH) {
+    return LIGHT_LEFT;
+  } else if (luzCentral == HIGH) {
+    return LIGHT_CENTER;
+  } else if (luzDerecha == HIGH) {
+    return LIGHT_RIGHT;
+  }
+
+  return NO_LIGHT;
 }
