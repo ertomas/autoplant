@@ -40,8 +40,9 @@ const unsigned long TIEMPO_GIRO = 700;       // Tiempo de giro en ms (para evasi
 const unsigned long TIEMPO_GIRO_LUZ = 200;   // Tiempo de giro corto para seguimiento de luz
 const unsigned long TIEMPO_AVANCE_TRAS_GIRO_LUZ = 1000; // Tiempo de avance tras giro por luz (1 segundo)
 const unsigned long TIEMPO_PAUSA_ANTES_AVANZAR = 8000; // 8 segundos de pausa
-const unsigned long TIEMPO_PAUSA_ANTES_RETROCEDER = 1500; // 1.5 segundos de pausa antes de retroceder
+const unsigned long TIEMPO_PAUSA_ANTES_RETROCEDER = 1000; // Sin pausa antes de retroceder
 const unsigned long TIEMPO_PAUSA_TRAS_GIRO = 500; // 500 ms de pausa tras cada giro
+const float DISTANCIA_OBSTACULO = 5; // Umbral de detección de obstáculos en cm
 
 // --- PARÁMETROS DEL SISTEMA DE RIEGO ---
 const int umbralSeco = 300;     // Umbral para suelo seco, ajusta según tu sensor
@@ -60,7 +61,7 @@ const unsigned long intervaloMedicionHumedad = 500; // Medir humedad cada 500 ms
 
 // Variables para el control no bloqueante del movimiento del robot
 unsigned long tiempoUltimaMedicionDistancia = 0;
-const unsigned long intervaloMedicionDistancia = 50; // Medir distancia cada 50 ms
+const unsigned long intervaloMedicionDistancia = 20; // Medir distancia cada 20 ms
 
 // Enum para el estado del robot (para lógica no bloqueante)
 enum EstadoRobot {
@@ -134,6 +135,8 @@ void loop() {
   }
 
   // ========================== Lógica del Robot (No Bloqueante) ==========================
+  // Verificación de distancia en cada iteración del loop
+  bool obstaculoDetectado = false;
   if (millis() - tiempoUltimaMedicionDistancia >= intervaloMedicionDistancia) {
     tiempoUltimaMedicionDistancia = millis();
 
@@ -142,51 +145,56 @@ void loop() {
     //Serial.print(distancia);
     //Serial.println(" cm");
 
+    // Si hay un obstáculo, detener y pasar a retroceder (excepto en PAUSANDO_ANTES_RETROCEDER y GIRANDO)
+    if (distancia > 0 && distancia <= DISTANCIA_OBSTACULO && estadoActual != PAUSANDO_ANTES_RETROCEDER && estadoActual != GIRANDO) {
+      Serial.println("Obstáculo detectado! Retrocediendo inmediatamente...");
+      detener(); // Detener el robot inmediatamente
+      estadoActual = PAUSANDO_ANTES_RETROCEDER;
+      detener(); // Asegurarse de que el robot se detenga
+      tiempoInicioAccion = millis();
+      obstaculoDetectado = true;
+    }
+  }
+
+  // Si no hay obstáculo, continuar con la lógica normal
+  if (!obstaculoDetectado) {
     // Obtener dirección de la luz solo en BUSCAR_LUZ
     int direccion = (estadoActual == BUSCAR_LUZ) ? getLightDirection() : NO_LIGHT;
 
     switch (estadoActual) {
       case BUSCAR_LUZ:
-        // Si hay un obstáculo, pasar a la lógica de evasión
-        if (distancia > 0 && distancia <= 15) {
-          Serial.println("Obstáculo detectado! Pausando antes de retroceder...");
-          estadoActual = PAUSANDO_ANTES_RETROCEDER;
-          detener();
-          tiempoInicioAccion = millis();
-        } else {
-          // Controlar el movimiento según la dirección de la luz
-          switch (direccion) {
-            case NO_LIGHT:
-              // Girar aleatoriamente si no se detecta luz
-              girarIzquierdaLuz = (random(0, 2) == 0);
-              if (girarIzquierdaLuz) {
-                Serial.println("No hay luz, girando izquierda aleatoriamente");
-              } else {
-                Serial.println("No hay luz, girando derecha aleatoriamente");
-              }
-              estadoActual = GIRANDO_LUZ;
-              tiempoInicioAccion = millis();
-              break;
-            case LIGHT_LEFT:
-              Serial.println("Girando izquierda por luz");
-              girarIzquierdaLuz = true;
-              estadoActual = GIRANDO_LUZ;
-              tiempoInicioAccion = millis();
-              break;
-            case LIGHT_CENTER:
-            case LIGHT_CENTER_LEFT:
-            case LIGHT_CENTER_RIGHT:
-            case LIGHT_FRONT:  // Aseguramos que se detenga cuando la luz está al frente
-              Serial.println("Luz detectada. Deteniendo.");
-              detener();
-              break;
-            case LIGHT_RIGHT:
-              Serial.println("Girando derecha por luz");
-              girarIzquierdaLuz = false;
-              estadoActual = GIRANDO_LUZ;
-              tiempoInicioAccion = millis();
-              break;
-          }
+        // Controlar el movimiento según la dirección de la luz
+        switch (direccion) {
+          case NO_LIGHT:
+            // Girar aleatoriamente si no se detecta luz
+            girarIzquierdaLuz = (random(0, 2) == 0);
+            if (girarIzquierdaLuz) {
+              Serial.println("No hay luz, girando izquierda aleatoriamente");
+            } else {
+              Serial.println("No hay luz, girando derecha aleatoriamente");
+            }
+            estadoActual = GIRANDO_LUZ;
+            tiempoInicioAccion = millis();
+            break;
+          case LIGHT_LEFT:
+            Serial.println("Girando izquierda por luz");
+            girarIzquierdaLuz = true;
+            estadoActual = GIRANDO_LUZ;
+            tiempoInicioAccion = millis();
+            break;
+          case LIGHT_CENTER:
+          case LIGHT_CENTER_LEFT:
+          case LIGHT_CENTER_RIGHT:
+          case LIGHT_FRONT:  // Aseguramos que se detenga cuando la luz está al frente
+            Serial.println("Luz detectada. Deteniendo.");
+            detener();
+            break;
+          case LIGHT_RIGHT:
+            Serial.println("Girando derecha por luz");
+            girarIzquierdaLuz = false;
+            estadoActual = GIRANDO_LUZ;
+            tiempoInicioAccion = millis();
+            break;
         }
         break;
 
@@ -197,6 +205,20 @@ void loop() {
         } else {
           girarDerecha(VELOCIDAD);
         }
+        // Verificar distancia durante el giro
+        if (millis() - tiempoUltimaMedicionDistancia >= intervaloMedicionDistancia) {
+          tiempoUltimaMedicionDistancia = millis();
+          float distancia = medirDistancia();
+          if (distancia > 0 && distancia <= DISTANCIA_OBSTACULO) {
+            Serial.println("Obstáculo detectado durante giro! Retrocediendo...");
+            detener();
+            estadoActual = PAUSANDO_ANTES_RETROCEDER;
+            detener();
+            tiempoInicioAccion = millis();
+            break;
+          }
+        }
+        // Continuar giro si no hay obstáculo
         if (millis() - tiempoInicioAccion >= TIEMPO_GIRO_LUZ) {
           Serial.println("Giro por luz completo. Avanzando...");
           estadoActual = AVANZANDO_TRAS_GIRO_LUZ;
@@ -206,7 +228,21 @@ void loop() {
         break;
 
       case AVANZANDO_TRAS_GIRO_LUZ:
-        // Mantener el avance durante TIEMPO_AVANCE_TRAS_GIRO_LUZ
+        // Mantener el avance y verificar distancia
+        avanzar(VELOCIDAD);
+        if (millis() - tiempoUltimaMedicionDistancia >= intervaloMedicionDistancia) {
+          tiempoUltimaMedicionDistancia = millis();
+          float distancia = medirDistancia();
+          if (distancia > 0 && distancia <= DISTANCIA_OBSTACULO) {
+            Serial.println("Obstáculo detectado durante avance! Retrocediendo...");
+            detener();
+            estadoActual = RETROCEDIENDO;
+            retroceder(VELOCIDAD);
+            tiempoInicioAccion = millis();
+            break;
+          }
+        }
+        // Continuar avance si no hay obstáculo
         if (millis() - tiempoInicioAccion >= TIEMPO_AVANCE_TRAS_GIRO_LUZ) {
           Serial.println("Avance tras giro completo. Pausando...");
           estadoActual = PAUSANDO_TRAS_GIRO;
